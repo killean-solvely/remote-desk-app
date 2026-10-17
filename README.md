@@ -40,3 +40,5 @@ Release signing is restricted to the main-branch releases environment. The priva
 ## Version 0.5.1
 
 Fixes remote-folder browsing when sibling names differ only by capitalization or Unicode normalization. Download preflight continues to protect against local path collisions and identifies the conflicting names.
+
+Folder rows offer **Calculate size**: recursively scan metadata without downloading contents, cancel large scans, and reuse totals while browsing during the current session. **Recalculate** refreshes a cached result. Only one size scan runs at a time; browsing and downloads remain available. Symlinks are excluded and incomplete scans do not display a total.

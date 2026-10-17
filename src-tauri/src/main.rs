@@ -27,6 +27,7 @@ struct Inner {
     data: PathBuf,
     bundled_engine: Mutex<Option<String>>,
     cancels: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    size_tasks: Mutex<HashMap<String, Arc<AtomicBool>>>,
     stop: AtomicBool,
     updating: AtomicBool,
     worker: Mutex<Option<std::thread::JoinHandle<()>>>,
@@ -80,6 +81,7 @@ impl State {
             data,
             bundled_engine: Mutex::new(None),
             cancels: Mutex::new(HashMap::new()),
+            size_tasks: Mutex::new(HashMap::new()),
             stop: AtomicBool::new(false),
             updating: AtomicBool::new(false),
             worker: Mutex::new(None),
@@ -737,6 +739,64 @@ async fn list_directory(
     .await
     .map_err(|_| "Listing task failed")?
 }
+// Keep a scan registered until its blocking worker exits, including failures.
+struct SizeTask {
+    state: State,
+    id: String,
+}
+impl Drop for SizeTask {
+    fn drop(&mut self) {
+        if let Ok(mut tasks) = self.state.0.size_tasks.lock() {
+            tasks.remove(&self.id);
+        }
+    }
+}
+#[tauri::command]
+async fn calculate_folder_size(
+    s: tauri::State<'_, State>,
+    remote_id: String,
+    path: String,
+    request_id: String,
+) -> Result<engine::FolderSize> {
+    uuid::Uuid::parse_str(&request_id).map_err(|_| "Invalid size request")?;
+    relative(&path)?;
+    let s = s.inner().clone();
+    let (r, connection_task) = s.lease_remote(&remote_id)?;
+    let flag = Arc::new(AtomicBool::new(false));
+    {
+        let mut tasks =
+            s.0.size_tasks
+                .lock()
+                .map_err(|_| "Folder size scan unavailable")?;
+        if !tasks.is_empty() {
+            return Err("Finish or cancel the current folder size scan first".into());
+        }
+        tasks.insert(request_id.clone(), flag.clone());
+    }
+    let task = SizeTask {
+        state: s.clone(),
+        id: request_id,
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let _connection_task = connection_task;
+        let _task = task;
+        engine::folder_size(&s.settings()?, &r, &s.hosts(&r), &path, flag)
+    })
+    .await
+    .map_err(|_| "Folder size task failed")?
+}
+#[tauri::command]
+fn cancel_folder_size(s: tauri::State<State>, request_id: String) -> Result<()> {
+    if let Some(flag) =
+        s.0.size_tasks
+            .lock()
+            .map_err(|_| "Folder size scan unavailable")?
+            .get(&request_id)
+    {
+        flag.store(true, Ordering::SeqCst);
+    }
+    Ok(())
+}
 #[tauri::command]
 async fn test_remote(s: tauri::State<'_, State>, remote_id: String) -> Result<String> {
     let s = s.inner().clone();
@@ -859,6 +919,8 @@ fn main() {
             clear_completed,
             test_remote,
             list_directory,
+            calculate_folder_size,
+            cancel_folder_size,
             get_metadata,
             enqueue_download,
             list_jobs,
@@ -875,6 +937,9 @@ fn main() {
     app.run(|app, event| {
         if let tauri::RunEvent::Exit = event {
             let s = app.state::<State>();
+            for flag in s.0.size_tasks.lock().unwrap().values() {
+                flag.store(true, Ordering::SeqCst);
+            }
             s.0.stop.store(true, Ordering::SeqCst);
             for flag in s.0.cancels.lock().unwrap().values() {
                 flag.store(true, Ordering::SeqCst);

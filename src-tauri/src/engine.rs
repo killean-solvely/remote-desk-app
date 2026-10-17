@@ -321,6 +321,49 @@ pub fn run<F: FnMut(Value)>(
     }
     Ok((data, had_error))
 }
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct FolderSize {
+    pub bytes: u64,
+    pub count: u64,
+}
+fn parse_folder_size(data: &[u8]) -> Result<FolderSize, String> {
+    #[derive(serde::Deserialize)]
+    struct Report {
+        bytes: u64,
+        count: u64,
+        #[serde(default)]
+        sizeless: u64,
+    }
+    let report: Report = serde_json::from_slice(data).map_err(|_| "Invalid folder size report")?;
+    if report.sizeless != 0 {
+        return Err("Some files did not report a size. A complete total is unavailable.".into());
+    }
+    Ok(FolderSize {
+        bytes: report.bytes,
+        count: report.count,
+    })
+}
+// Metadata only: no copy, hashing, or shell access. The shared SFTP configuration
+// pins host keys, uses the OS credential store and excludes symlinks.
+pub fn folder_size(
+    s: &Settings,
+    r: &Remote,
+    hosts: &Path,
+    path: &str,
+    cancel: Arc<AtomicBool>,
+) -> Result<FolderSize, String> {
+    let mut c = remote_command(s, r, hosts)?;
+    c.args(["size", &source(r, path)?, "--json"]);
+    read_folder_size(&mut c, cancel)
+}
+fn read_folder_size(c: &mut Command, cancel: Arc<AtomicBool>) -> Result<FolderSize, String> {
+    let (data, had_error) = run(c, Some(cancel), Duration::from_secs(1800), |_| {})?;
+    if had_error {
+        return Err("Some folders could not be read. A complete size is unavailable.".into());
+    }
+    parse_folder_size(&data)
+}
+
 pub fn list(
     s: &Settings,
     r: &Remote,
@@ -475,6 +518,104 @@ pub fn store_password(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn size_cancel_fixture() {
+        if std::env::var_os("RDESK_SIZE_CANCEL_FIXTURE").is_some() {
+            thread::sleep(Duration::from_secs(30));
+        }
+    }
+    #[test]
+    fn folder_size_cancels_a_running_process() {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "engine::tests::size_cancel_fixture",
+                "--nocapture",
+            ])
+            .env("RDESK_SIZE_CANCEL_FIXTURE", "1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let flag = Arc::new(AtomicBool::new(false));
+        let signal = flag.clone();
+        let setter = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(350));
+            signal.store(true, Ordering::SeqCst);
+        });
+        let start = Instant::now();
+        assert_eq!(
+            read_folder_size(&mut command, flag).unwrap_err(),
+            "Canceled"
+        );
+        assert!(start.elapsed() < Duration::from_secs(5));
+        setter.join().unwrap();
+    }
+    #[test]
+    fn folder_size_requires_complete_nonnegative_totals() {
+        assert_eq!(
+            parse_folder_size(br#"{"bytes":12,"count":2,"sizeless":0}"#).unwrap(),
+            FolderSize {
+                bytes: 12,
+                count: 2
+            }
+        );
+        assert_eq!(
+            parse_folder_size(br#"{"bytes":0,"count":0}"#)
+                .unwrap()
+                .bytes,
+            0
+        );
+        for invalid in [
+            br#"{"bytes":12,"count":2,"sizeless":1}"#.as_slice(),
+            br#"{"bytes":-1,"count":1}"#,
+            br#"{"bytes":0}"#,
+            b"not json",
+        ] {
+            assert!(parse_folder_size(invalid).is_err());
+        }
+    }
+    #[test]
+    #[ignore = "Requires RDESK_TEST_RCLONE; reads only generated local metadata"]
+    fn real_rclone_folder_size() {
+        let exe = std::env::var("RDESK_TEST_RCLONE").unwrap();
+        let root = std::env::temp_dir().join(format!("remotedesk-size-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("nested/empty")).unwrap();
+        std::fs::write(root.join("one.bin"), [1u8; 13]).unwrap();
+        std::fs::write(root.join("nested/two.bin"), [2u8; 29]).unwrap();
+        let mut c = process(&exe);
+        c.arg("size").arg(&root).args(["--json", "--use-json-log"]);
+        let result = read_folder_size(&mut c, Arc::new(AtomicBool::new(false))).unwrap();
+        assert_eq!(
+            result,
+            FolderSize {
+                bytes: 42,
+                count: 2
+            }
+        );
+        let mut c = process(&exe);
+        c.arg("size").arg(root.join("nested/empty")).arg("--json");
+        assert_eq!(
+            read_folder_size(&mut c, Arc::new(AtomicBool::new(false))).unwrap(),
+            FolderSize { bytes: 0, count: 0 }
+        );
+        let mut c = process(&exe);
+        c.arg("size").arg(root.join("missing")).args([
+            "--json",
+            "--retries",
+            "1",
+            "--use-json-log",
+        ]);
+        assert!(read_folder_size(&mut c, Arc::new(AtomicBool::new(false))).is_err());
+        let mut c = process(&exe);
+        c.arg("size").arg(&root).arg("--json");
+        assert_eq!(
+            read_folder_size(&mut c, Arc::new(AtomicBool::new(true))).unwrap_err(),
+            "Canceled"
+        );
+        assert_eq!(std::fs::read(root.join("one.bin")).unwrap(), [1u8; 13]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn case_collision() {
         let a = Entry {

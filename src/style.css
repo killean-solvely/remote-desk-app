@@ -3,3 +3,5 @@
 .connection-actions{display:flex;flex-wrap:wrap;gap:10px}.danger{color:#ffb2bd;border-color:#8c455a}.confirm{margin-top:18px;padding:16px;border:1px solid #8c455a;border-radius:8px;background:#291e29}.job-metrics{flex-wrap:wrap}
 
 .host-key{border:1px solid #847040;background:#29271c;padding:18px;border-radius:8px;margin:16px 0}.host-key code{display:block;font-size:14px;user-select:text}.host-key p{font-size:12px}details{margin:16px 0;color:#97a6bb}summary{cursor:pointer;font-size:12px}
+
+.folder-size{display:flex;flex-wrap:wrap;align-items:center;gap:8px}.size-action{padding:5px 9px;font-size:.85rem}.size-status{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:12px 0;padding:12px 16px;background:#152b32;border:1px solid #31545a;border-radius:10px}.size-status span{overflow-wrap:anywhere}.size-status button{flex-shrink:0}.size-help{font-size:.85rem}
