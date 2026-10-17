@@ -1,0 +1,21 @@
+import {readFileSync, writeFileSync} from 'node:fs';
+
+const version = process.argv[2];
+if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version ?? '')) throw Error('Usage: node scripts/set-version.mjs 0.5.1');
+const packagePath = 'package.json';
+const tauriPath = 'src-tauri/tauri.conf.json';
+const cargoPath = 'src-tauri/Cargo.toml';
+const lockPath = 'src-tauri/Cargo.lock';
+const pkg = JSON.parse(readFileSync(packagePath, 'utf8'));
+const tauri = JSON.parse(readFileSync(tauriPath, 'utf8'));
+const cargo = readFileSync(cargoPath, 'utf8');
+const lock = readFileSync(lockPath, 'utf8');
+const packagePattern = /(\[package\]\s*\nname = "remote-desk"\s*\nversion = ")[^"]+("[\r\n])/;
+const lockPattern = /(\[\[package\]\]\s*\nname = "remote-desk"\s*\nversion = ")[^"]+("[\r\n])/;
+if (!packagePattern.test(cargo) || !lockPattern.test(lock)) throw Error('App version entries could not be located; no files changed');
+pkg.version = tauri.version = version;
+writeFileSync(packagePath, JSON.stringify(pkg, null, 2) + '\n');
+writeFileSync(tauriPath, JSON.stringify(tauri, null, 2) + '\n');
+writeFileSync(cargoPath, cargo.replace(packagePattern, `$1${version}$2`));
+writeFileSync(lockPath, lock.replace(lockPattern, `$1${version}$2`));
+console.log(`Updated all four app version files to ${version}. Commit and push before building.`);

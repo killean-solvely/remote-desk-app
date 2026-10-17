@@ -1,0 +1,21 @@
+import {readFileSync,writeFileSync,readdirSync,copyFileSync,mkdirSync,existsSync} from 'node:fs';
+import {join} from 'node:path';
+const target=process.argv[2];
+const version=JSON.parse(readFileSync('package.json','utf8')).version;
+const platforms={'aarch64-apple-darwin':'darwin-aarch64','x86_64-apple-darwin':'darwin-x86_64','x86_64-pc-windows-msvc':'windows-x86_64'};
+if(!platforms[target])throw Error('Unsupported update target');
+const mac=target.endsWith('darwin');
+const dir=`src-tauri/target/${target}/release/bundle/${mac?'macos':'nsis'}`;
+const source=readdirSync(dir).filter(f=>f.endsWith(mac?'.app.tar.gz':'-setup.exe'));
+if(source.length===0&&!process.env.REMOTE_DESK_RELEASE_TAG)process.exit(0);
+if(source.length!==1)throw Error('Expected exactly one updater package');
+const filename=`Remote-Desk-${version}-${target}.${mac?'app.tar.gz':'exe'}`;
+const sigPath=join(dir,source[0]+'.sig');
+if(!existsSync(sigPath)){if(process.env.REMOTE_DESK_RELEASE_TAG)throw Error('Release package missing signature');process.exit(0);}
+const signature=readFileSync(sigPath,'utf8').trim();
+if(!signature)throw Error('Missing update signature');
+mkdirSync('artifacts',{recursive:true});
+copyFileSync(join(dir,source[0]),join('artifacts',filename));
+writeFileSync(join('artifacts',filename+'.sig'),signature+'\n');
+writeFileSync(`artifacts/update-${target}.json`,JSON.stringify({version,commit:process.env.GITHUB_SHA??null,platform:platforms[target],filename,signature},null,2));
+console.log(`Packaged signed update for ${target}`);

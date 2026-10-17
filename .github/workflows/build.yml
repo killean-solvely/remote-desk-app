@@ -1,0 +1,97 @@
+name: Desktop builds
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Publish signed release (for example v0.5.1); blank runs checks only'
+        required: false
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: desktop-main
+  cancel-in-progress: false
+jobs:
+  desktop:
+    if: github.repository == 'killean-solvely/remote-desk-app' && github.ref == 'refs/heads/main'
+    timeout-minutes: 60
+    environment: ${{ inputs.release_tag != '' && 'releases' || 'checks' }}
+    env:
+      REMOTE_DESK_RELEASE_TAG: ${{ inputs.release_tag }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-26
+            target: aarch64-apple-darwin
+          - os: macos-26-intel
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Prepare build workspace
+        run: node scripts/prepare-build.mjs ${{ matrix.target }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: pnpm install --frozen-lockfile
+      - name: Prepare checksum-pinned bundled engine
+        run: node scripts/prepare-rclone.mjs ${{ matrix.target }}
+      - run: node --test scripts/build-scripts.test.mjs
+      - run: pnpm build
+      - run: cargo test --locked --target ${{ matrix.target }} --manifest-path src-tauri/Cargo.toml --bin remote-desk
+      - name: Offline transfer integration tests
+        run: cargo test --locked --target ${{ matrix.target }} --manifest-path src-tauri/Cargo.toml --bin remote-desk -- --ignored
+      - name: Validate native Mac password dialog
+        if: runner.os == 'macOS'
+        run: osacompile -o "$RUNNER_TEMP/remote-desk-password.scpt" src-tauri/src/password_prompt.applescript
+      - name: Build native installer and signed update
+        env:
+          APPLE_SIGNING_IDENTITY: '-'
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: node scripts/build-desktop.mjs ${{ matrix.target }}
+      - name: Verify and package installer
+        run: node scripts/package-installers.mjs ${{ matrix.target }}
+      - run: node scripts/package-updates.mjs ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: remote-desk-${{ matrix.target }}-installer
+          retention-days: 1
+          if-no-files-found: error
+          path: artifacts/*
+  publish:
+    if: github.repository == 'killean-solvely/remote-desk-app' && github.ref == 'refs/heads/main' && inputs.release_tag != ''
+    needs: desktop
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: releases
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: remote-desk-*-installer
+          path: artifacts
+          merge-multiple: true
+      - name: Publish complete signed update feed
+        env:
+          REMOTE_DESK_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: node scripts/publish-update.mjs
