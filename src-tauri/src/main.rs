@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod bookmarks;
 mod credentials;
 mod engine;
 mod hostkeys;
@@ -127,6 +128,11 @@ impl State {
         let _guard = self.0.mutations.lock().map_err(|_| "Connection is busy")?;
         self.allow_work()?;
         let remote = self.remote(id)?;
+        let task = self.connection_task(id)?;
+        Ok((remote, task))
+    }
+    // Caller holds mutations while checking the saved connection snapshot.
+    fn connection_task(&self, id: &str) -> Result<ConnectionTask> {
         *self
             .0
             .connection_tasks
@@ -134,13 +140,10 @@ impl State {
             .map_err(|_| "Connection is busy")?
             .entry(id.into())
             .or_default() += 1;
-        Ok((
-            remote,
-            ConnectionTask {
-                state: self.clone(),
-                id: id.into(),
-            },
-        ))
+        Ok(ConnectionTask {
+            state: self.clone(),
+            id: id.into(),
+        })
     }
     fn idle_remote(&self, id: &str) -> Result<Remote> {
         let remote = self.remote(id)?;
@@ -653,7 +656,7 @@ fn update_connection(
     if identity_changed || remote.auth != old.auth {
         credentials::delete(&remote.id)?;
     }
-    s.put("remote", &remote.id, &remote)?;
+    bookmarks::persist_connection(s, &old, &remote)?;
     if old.known_hosts != remote.known_hosts {
         let _ = std::fs::remove_file(s.hosts(&old));
     }
@@ -679,14 +682,7 @@ fn delete_connection(s: &State, remote_id: &str) -> Result<()> {
     s.allow_work()?;
     let remote = s.idle_remote(&remote_id)?;
     credentials::delete(&remote_id)?;
-    s.0.db
-        .lock()
-        .map_err(|_| "Database lock failed")?
-        .execute(
-            "DELETE FROM records WHERE kind='remote' AND id=?1",
-            [&remote_id],
-        )
-        .map_err(|_| "Cannot delete connection")?;
+    bookmarks::delete_connection_records(s, remote_id)?;
     let _ = std::fs::remove_file(s.hosts(&remote));
     Ok(())
 }
@@ -950,6 +946,12 @@ fn main() {
             get_metadata,
             enqueue_download,
             list_jobs,
+            bookmarks::list_bookmarks,
+            bookmarks::add_bookmark,
+            bookmarks::rename_bookmark,
+            bookmarks::delete_bookmark,
+            bookmarks::confirm_bookmark,
+            bookmarks::open_bookmark,
             file_manager_name,
             open_download_location,
             cancel_job,

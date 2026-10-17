@@ -11,6 +11,7 @@ Current Windows installers have no publisher certificate. Mac bundles are ad-hoc
 ## Features
 
 - Browse remote directories, filter and select files or folders.
+- Bookmark remote folders under each connection, with local persistence and quick navigation.
 - Fetch the SSH host-key fingerprint, verify it independently and pin it before authentication.
 - Enter passwords in a native prompt and store them in Windows Credential Manager or macOS Keychain; SSH-agent authentication is also supported.
 - Queue downloads with aggregate/per-file progress, cancellation, retry, readable ETA and persistent history.
@@ -37,6 +38,12 @@ The engine download is checked against a pinned SHA256 before it is bundled. No 
 The manually dispatched Desktop builds workflow uses standard GitHub-hosted Windows and native Apple Silicon/Intel Mac runners. It runs the frontend, Rust tests, generated local transfer fixtures and installer checks. It does not use a personal machine or connect to a production SFTP server.
 
 Release signing is restricted to the main-branch releases environment. The private signing key is never committed. All three signed packages must pass before the HTTPS update feed advances. See [release maintenance](docs/updates.md) and [architecture](docs/architecture.md).
+
+## Version 0.6.0
+
+After opening a remote folder, choose **Bookmark this folder**. Bookmarks appear beneath their connection in the sidebar; click one to browse it, or choose **Edit** to rename or remove it. Root folders are supported. Bookmarks stay on this computer and saving them does not connect.
+
+Changing a connection's server, port, username or root requires reviewing its bookmark targets before opening them. Renaming a connection or changing its password keeps bookmarks usable. Deleting a connection removes its bookmarks and preserves downloaded files and history.
 
 ## Version 0.5.3
 

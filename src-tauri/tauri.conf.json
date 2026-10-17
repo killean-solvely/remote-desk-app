@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Remote Desk",
-  "version": "0.5.3",
+  "version": "0.6.0",
   "identifier": "com.remotedesk.desktop",
   "build": {
     "beforeDevCommand": "node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 1420 --strictPort",
