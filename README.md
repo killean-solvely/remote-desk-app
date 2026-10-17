@@ -15,6 +15,7 @@ Current Windows installers have no publisher certificate. Mac bundles are ad-hoc
 - Enter passwords in a native prompt and store them in Windows Credential Manager or macOS Keychain; SSH-agent authentication is also supported.
 - Queue downloads with aggregate/per-file progress, cancellation, retry, readable ETA and persistent history.
 - Edit/delete saved connections and clear completed history without deleting downloaded files.
+- Reveal completed downloads in Explorer/Finder, or open a transfer's download folder.
 - Check for signed application updates and install them with confirmation.
 
 Each selected item receives its own local job directory. Browsing preserves case-distinct names; a folder copy refuses names that would collide in one local directory tree. Completed-file retries use size checks; partial multithreaded files may restart from zero. SFTP downloads do not promise preservation of macOS bundle metadata or permissions; use a remotely prepared archive when that matters.
@@ -37,7 +38,13 @@ The manually dispatched Desktop builds workflow uses standard GitHub-hosted Wind
 
 Release signing is restricted to the main-branch releases environment. The private signing key is never committed. All three signed packages must pass before the HTTPS update feed advances. See [release maintenance](docs/updates.md) and [architecture](docs/architecture.md).
 
-## Version 0.5.1
+## Version 0.5.3
+
+Completed transfers offer **Show in Explorer/Finder**. **Open download folder** is also available for partial or failed transfers. These actions work from saved history even after a connection is deleted; missing locations show an explanation.
+
+Remote browsing accepts server filenames that cannot be saved on both desktop platforms. Download preflight still rejects incompatible local names and identifies the item that needs attention.
+
+## Earlier improvements
 
 Fixes remote-folder browsing when sibling names differ only by capitalization or Unicode normalization. Download preflight continues to protect against local path collisions and identifies the conflicting names.
 

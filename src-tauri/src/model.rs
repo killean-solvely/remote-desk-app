@@ -56,15 +56,49 @@ pub struct Job {
     pub detail: String,
     pub stats: Value,
 }
+// Remote SFTP components are not local Windows/macOS filenames. Preserve their
+// spelling while rejecting traversal and protocol separators only.
+pub fn remote_name(name: &str) -> Result<(), String> {
+    if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\0']) {
+        return Err("Invalid remote path component".into());
+    }
+    Ok(())
+}
+pub fn remote_relative(path: &str) -> Result<String, String> {
+    if path.is_empty() {
+        return Ok(String::new());
+    }
+    if path.starts_with('/') {
+        return Err("Use a relative remote path".into());
+    }
+    for part in path.split('/') {
+        remote_name(part)?;
+    }
+    Ok(path.into())
+}
+pub fn download_name(path: &str) -> Result<&str, String> {
+    remote_relative(path)?;
+    let name = path
+        .rsplit('/')
+        .next()
+        .filter(|n| !n.is_empty())
+        .ok_or("Select a file or folder")?;
+    safe_name(name).map_err(|_| format!("Cannot download {name:?}: its name cannot be safely saved on Windows and macOS. Choose another item or rename it on the server."))?;
+    Ok(name)
+}
+pub fn download_target(
+    destination: &std::path::Path,
+    path: &str,
+) -> Result<std::path::PathBuf, String> {
+    Ok(destination.join(download_name(path)?))
+}
 pub fn relative(path: &str) -> Result<String, String> {
     if path.is_empty() {
         return Ok(String::new());
     }
-    if path.starts_with('/') || path.contains('\\') {
-        return Err("Use a relative remote path".into());
-    }
+    remote_relative(path)?;
     for part in path.split('/') {
-        safe_name(part)?;
+        safe_name(part).map_err(|_| format!("Cannot download {path:?}: its name cannot be safely saved on Windows and macOS. Choose another item or rename it on the server."))?;
     }
     Ok(path.into())
 }
@@ -90,7 +124,7 @@ pub fn safe_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 pub fn source(r: &Remote, path: &str) -> Result<String, String> {
-    let p = relative(path)?;
+    let p = remote_relative(path)?;
     Ok(format!(
         "app:{}{}{}",
         r.root,
@@ -131,6 +165,27 @@ mod tests {
             assert!(relative(p).is_err(), "{p}");
         }
         assert!(relative("Projects/Artist's Reference [Sample]").is_ok());
+    }
+    #[test]
+    fn remote_paths_preserve_names_that_cannot_be_saved_locally() {
+        for path in [
+            "Parent:folder/file.zip",
+            "CON.txt",
+            "trailing.",
+            "name?",
+            "a\\b",
+            "a\nb",
+        ] {
+            assert!(remote_relative(path).is_ok(), "{path:?}");
+        }
+        for path in ["../escape", "/absolute", "a/../b", "a//b", "a/./b", "a\0b"] {
+            assert!(remote_relative(path).is_err(), "{path:?}");
+        }
+        assert_eq!(download_name("Parent:folder/file.zip").unwrap(), "file.zip");
+        assert!(download_name("Parent/CON.txt")
+            .unwrap_err()
+            .contains("CON.txt"));
+        assert!(relative("Parent:folder/file.zip").is_err());
     }
     #[test]
     fn parse_json_stats() {

@@ -2,6 +2,7 @@
 mod credentials;
 mod engine;
 mod hostkeys;
+mod locations;
 mod model;
 mod updates;
 use model::*;
@@ -253,7 +254,7 @@ fn validate_remote(remote: &mut Remote) -> Result<()> {
     let root = remote.root.trim_end_matches('/');
     let relative_root = root.trim_start_matches('/');
     if !relative_root.is_empty() {
-        relative(relative_root)?;
+        remote_relative(relative_root)?;
     }
     remote.root = if remote.root == "/" {
         "/".into()
@@ -361,7 +362,7 @@ fn transfer(s: &State, app: &tauri::AppHandle, j: &mut Job, cancel: Arc<AtomicBo
             "Not enough free space (conservative full-source estimate, including retries)".into(),
         );
     }
-    let target = destination.join(j.path.rsplit('/').next().ok_or("Select a file or folder")?);
+    let target = download_target(destination, &j.path)?;
     if !entry.is_dir && target.exists() {
         engine::check_existing_file(&target, entry.size.max(0) as u64)?;
     }
@@ -501,6 +502,31 @@ fn get_settings(s: tauri::State<State>) -> Result<Settings> {
 #[tauri::command]
 fn list_jobs(s: tauri::State<State>) -> Result<Vec<Job>> {
     s.all("job")
+}
+#[tauri::command]
+fn file_manager_name() -> &'static str {
+    locations::file_manager_name()
+}
+fn location_job(s: &State, id: &str) -> Result<Job> {
+    s.all::<Job>("job")?
+        .into_iter()
+        .find(|j| j.id == id)
+        .ok_or("Transfer history entry not found".into())
+}
+#[tauri::command]
+async fn open_download_location(
+    s: tauri::State<'_, State>,
+    id: String,
+    action: locations::LocationAction,
+) -> Result<()> {
+    let s = s.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        s.allow_work()?;
+        let job = location_job(&s, &id)?;
+        locations::open(&job, action)
+    })
+    .await
+    .map_err(|_| "Could not open the saved download location")?
 }
 #[tauri::command]
 fn get_logs(s: tauri::State<State>) -> Result<Vec<Value>> {
@@ -759,7 +785,7 @@ async fn calculate_folder_size(
     request_id: String,
 ) -> Result<engine::FolderSize> {
     uuid::Uuid::parse_str(&request_id).map_err(|_| "Invalid size request")?;
-    relative(&path)?;
+    remote_relative(&path)?;
     let s = s.inner().clone();
     let (r, connection_task) = s.lease_remote(&remote_id)?;
     let flag = Arc::new(AtomicBool::new(false));
@@ -835,7 +861,7 @@ fn enqueue_download(
     let _guard = s.0.mutations.lock().map_err(|_| "Connection is busy")?;
     s.allow_work()?;
     s.remote(&remote_id)?;
-    relative(&path)?;
+    download_name(&path)?;
     if path.is_empty() {
         return Err("Select a file or folder inside the remote root".into());
     }
@@ -924,6 +950,8 @@ fn main() {
             get_metadata,
             enqueue_download,
             list_jobs,
+            file_manager_name,
+            open_download_location,
             cancel_job,
             retry_job,
             get_settings,
@@ -972,6 +1000,32 @@ mod persistence_tests {
             auth: "agent".into(),
             known_hosts: "fixture.known_hosts".into(),
         }
+    }
+    #[test]
+    fn legacy_job_locations_work_without_a_saved_remote() {
+        let data = std::env::temp_dir().join(format!(
+            "remotedesk-offline-location-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir(&data).unwrap();
+        let data = std::fs::canonicalize(data).unwrap();
+        {
+            let s = State::open(data.join("state")).unwrap();
+            let id = uuid::Uuid::new_v4().to_string();
+            let destination = data.join(format!("RemoteDesk-{id}"));
+            std::fs::create_dir(&destination).unwrap();
+            std::fs::write(destination.join("example.zip"), b"local fixture").unwrap();
+            let legacy: Job = serde_json::from_value(json!({"id":id,"remoteId":"deleted", "path":"Parent:remote/example.zip", "destination":destination, "state":"completed", "detail":"", "stats":{}})).unwrap();
+            s.put("job", &legacy.id, &legacy).unwrap();
+            let loaded = location_job(&s, &legacy.id).unwrap();
+            assert_eq!(
+                locations::resolve(&loaded, locations::LocationAction::Reveal).unwrap(),
+                destination.join("example.zip")
+            );
+            assert!(matches!(location_job(&s, "unknown"), Err(e) if e.contains("not found")));
+            assert!(s.all::<Remote>("remote").unwrap().is_empty());
+        }
+        std::fs::remove_dir_all(data).unwrap();
     }
     #[test]
     fn connection_edits_keep_identity_and_pins_and_require_verified_host_changes() {

@@ -388,8 +388,11 @@ pub fn list(
 pub fn validate_listing(entries: &[Entry]) -> Result<(), String> {
     let mut names = std::collections::HashSet::new();
     for e in entries {
-        relative(&e.path)?;
-        safe_name(&e.name)?;
+        remote_relative(&e.path)?;
+        remote_name(&e.name)?;
+        if e.path.rsplit('/').next() != Some(e.name.as_str()) {
+            return Err("The remote listing name does not match its path".into());
+        }
         if e.path.is_empty() {
             return Err("Invalid empty listing path".into());
         }
@@ -407,6 +410,7 @@ pub fn validate_manifest(entries: &[Entry]) -> Result<(), String> {
     validate_listing(entries)?;
     let mut names = std::collections::HashMap::new();
     for entry in entries {
+        relative(&entry.path)?;
         let mut prefix = String::new();
         for component in entry.path.split('/') {
             if !prefix.is_empty() {
@@ -673,8 +677,37 @@ mod tests {
         let error = validate_manifest(&implicit_parents).unwrap_err();
         assert!(error.contains("\"Folder\"") && error.contains("\"folder\""));
         assert!(validate_listing(&[entry("same", false), entry("same", false)]).is_err());
-        for invalid in ["../escape", "a/../escape", "a\\escape", "CON.txt"] {
+        for invalid in [
+            "../escape",
+            "a/../escape",
+            "a//escape",
+            "a/./escape",
+            "bad\0name",
+        ] {
             assert!(validate_listing(&[entry(invalid, false)]).is_err());
+        }
+    }
+    #[test]
+    fn browsing_does_not_enforce_destination_portability() {
+        for name in [
+            "Folder: notes",
+            "CON.txt",
+            "trailing.",
+            "trailing ",
+            "question?",
+            "back\\slash",
+            "line\nbreak",
+        ] {
+            let entry = Entry {
+                path: name.into(),
+                name: name.into(),
+                size: 1,
+                is_dir: false,
+                mod_time: String::new(),
+            };
+            assert!(validate_listing(&[entry.clone()]).is_ok(), "{name:?}");
+            let error = validate_manifest(&[entry]).unwrap_err();
+            assert!(error.contains(&format!("{name:?}")), "{error}");
         }
     }
     #[test]
