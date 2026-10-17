@@ -947,6 +947,13 @@ fn main() {
             if let Some(handle) = s.0.worker.lock().unwrap().take() {
                 let _ = handle.join();
             };
+            // Allow canceled metadata workers to reap their rclone children before
+            // the process exits; never leave a size scan running after app quit.
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while !s.0.size_tasks.lock().unwrap().is_empty() && std::time::Instant::now() < deadline
+            {
+                std::thread::sleep(Duration::from_millis(25));
+            }
         }
     });
 }
