@@ -95,9 +95,10 @@ pub fn resolve(job: &Job, action: LocationAction) -> Result<PathBuf, String> {
 // generic IPC capability, and open_path is restricted to the known job container.
 pub fn open(job: &Job, action: LocationAction) -> Result<(), String> {
     dispatch(job, action, |path, action| {
+        let path = shell_path(path)?;
         match action {
-            LocationAction::Reveal => tauri_plugin_opener::reveal_item_in_dir(path),
-            LocationAction::Folder => tauri_plugin_opener::open_path(path, None::<&str>),
+            LocationAction::Reveal => tauri_plugin_opener::reveal_item_in_dir(&path),
+            LocationAction::Folder => tauri_plugin_opener::open_path(&path, None::<&str>),
         }
         .map_err(|_| {
             format!(
@@ -106,6 +107,31 @@ pub fn open(job: &Job, action: LocationAction) -> Result<(), String> {
             )
         })
     })
+}
+
+fn shell_path(path: &Path) -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    {
+        // Explorer rejects some extended-length paths. Convert only when the
+        // ordinary shell spelling resolves to exactly the already checked item.
+        // Keep canonical extended paths for every filesystem safety check.
+        let text = path
+            .to_str()
+            .ok_or("The saved location cannot be displayed")?;
+        let candidate = if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+            PathBuf::from(format!(r"\\{rest}"))
+        } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+            PathBuf::from(rest)
+        } else {
+            path.to_path_buf()
+        };
+        if std::fs::canonicalize(&candidate).ok().as_deref() != Some(path) {
+            return Err("The saved location changed or cannot be opened in Explorer.".into());
+        }
+        Ok(candidate)
+    }
+    #[cfg(not(windows))]
+    Ok(path.to_path_buf())
 }
 
 fn dispatch<F>(job: &Job, action: LocationAction, opener: F) -> Result<(), String>
@@ -262,6 +288,11 @@ mod tests {
             resolve(&fixture.job, LocationAction::Reveal).unwrap(),
             std::fs::canonicalize(&target).unwrap()
         );
+        let canonical = std::fs::canonicalize(&target).unwrap();
+        let shell = shell_path(&canonical).unwrap();
+        assert_eq!(std::fs::canonicalize(&shell).unwrap(), canonical);
+        #[cfg(windows)]
+        assert!(!shell.to_string_lossy().starts_with(r"\\?\"));
         assert_eq!(
             dispatch(&fixture.job, LocationAction::Reveal, |_, _| Err(
                 "File manager unavailable".into()
