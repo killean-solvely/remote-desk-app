@@ -12,6 +12,12 @@ type Entry={Path:string;Name:string;Size:number;IsDir:boolean;ModTime:string};
 type FolderSize={bytes:number;count:number};
 type SizeScan={id:string;key:string;remoteId:string;path:string;canceled:boolean};
 const sizeKey=(id:string,p:string)=>JSON.stringify([id,p]);
+// WKWebView custom origins need not expose secure-context-only randomUUID.
+const sizeRequestId=()=>{
+ const bytes=crypto.getRandomValues(new Uint8Array(16));bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
+ const hex=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+ return [hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-');
+};
 const childPath=(parent:string,name:string)=>[parent,name].filter(Boolean).join('/');
 type Stats={bytes?:number;totalBytes?:number;speed?:number;eta?:number;transferring?:{name:string;bytes:number;size:number;speed:number;percentage:number}[]};
 type Job={id:string;remoteId:string;path:string;destination:string;state:string;detail:string;stats:Stats};
@@ -30,7 +36,7 @@ function App(){
  async function calculateSize(entry:Entry){
   if(sizeScanRef.current)return;
   const p=childPath(path,entry.Name),key=sizeKey(remoteId,p);
-  const scan:SizeScan={id:crypto.randomUUID(),key,remoteId,path:p,canceled:false};
+  const scan:SizeScan={id:sizeRequestId(),key,remoteId,path:p,canceled:false};
   sizeScanRef.current=scan;setSizeScan(scan);setError('');
   setFolderSizes(cache=>{const next={...cache};delete next[key];return next});
   try{
