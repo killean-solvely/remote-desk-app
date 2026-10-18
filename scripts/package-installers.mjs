@@ -8,6 +8,7 @@ const targets = {'darwin-arm64':'aarch64-apple-darwin', 'darwin-x64':'x86_64-app
 const intelOnAppleSilicon = process.platform === 'darwin' && process.arch === 'arm64' && target === 'x86_64-apple-darwin';
 if (target !== targets[`${process.platform}-${process.arch}`] && !intelOnAppleSilicon) throw Error('Run on the corresponding packaging OS.');
 const version = JSON.parse(readFileSync('package.json', 'utf8')).version;
+const identifier = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8')).identifier;
 const engine = JSON.parse(readFileSync('.tools/ci-engine/engine.json', 'utf8'));
 const release = resolve('src-tauri/target', target, 'release');
 function run(executable, args, timeout = 120000, extra = {}) {
@@ -38,6 +39,7 @@ if (process.platform === 'darwin') {
   try {
     const app = join(mount, 'Remote Desk.app');
     if (!existsSync(join(mount, 'Applications'))) throw Error('DMG missing Applications shortcut.');
+    if (run('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleIdentifier', join(app, 'Contents/Info.plist')]).trim() !== identifier) throw Error('Mac notification bundle identity differs from the application.');
     run('/usr/bin/codesign', ['--verify', '--deep', '--strict', app]);
     const architecture = target === 'x86_64-apple-darwin' ? 'x86_64' : 'arm64';
     for (const binary of [join(app, 'Contents/MacOS/remote-desk'), join(app, 'Contents/Resources/engine/rclone')]) {
@@ -62,6 +64,8 @@ if (process.platform === 'darwin') {
   if (!existsSync(join(install, 'uninstall.exe'))) throw Error('Installed uninstaller is missing.');
   const shortcut = join(process.env.APPDATA, 'Microsoft/Windows/Start Menu/Programs/Remote Desk/Remote Desk.lnk');
   if (!existsSync(shortcut)) throw Error('Start menu shortcut is missing.');
+  const shortcutId = run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', '$s=New-Object -ComObject Shell.Application; $f=$s.Namespace([IO.Path]::GetDirectoryName($env:RDESK_SHORTCUT)); $f.ParseName([IO.Path]::GetFileName($env:RDESK_SHORTCUT)).ExtendedProperty("System.AppUserModel.ID")'], 30000, {env:{...process.env,RDESK_SHORTCUT:shortcut}}).trim();
+  if (shortcutId !== identifier) throw Error('Installed Windows notification identity differs from the application.');
   checkEngine(join(install, 'engine'), join(install, 'engine/rclone.exe'));
   verification = 'isolated hosted-runner installation and installed engine checks; local files only';
   } else {

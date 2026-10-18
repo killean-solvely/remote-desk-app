@@ -3163,6 +3163,8 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9df9128cbbfef73cda168416ccf7f837b62737d748333bfe9ab71c245d76613e"
 dependencies = [
+ "bitflags 2.13.2",
+ "block2",
  "objc2",
  "objc2-foundation",
 ]
@@ -3885,10 +3887,15 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "remote-desk"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
+ "block2",
  "fs2",
  "keyring",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "objc2-user-notifications",
  "rfd",
  "rpassword",
  "rusqlite",
@@ -3902,6 +3909,7 @@ dependencies = [
  "tokio",
  "unicode-normalization",
  "uuid",
+ "windows",
  "windows-sys 0.59.0",
  "zeroize",
 ]

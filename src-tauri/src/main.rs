@@ -5,6 +5,7 @@ mod engine;
 mod hostkeys;
 mod locations;
 mod model;
+mod notifications;
 mod updates;
 use model::*;
 use rusqlite::{params, Connection};
@@ -33,6 +34,7 @@ struct Inner {
     stop: AtomicBool,
     updating: AtomicBool,
     worker: Mutex<Option<std::thread::JoinHandle<()>>>,
+    notifications: notifications::Runtime,
     _lock: std::fs::File,
 }
 #[derive(Clone)]
@@ -87,6 +89,7 @@ impl State {
             stop: AtomicBool::new(false),
             updating: AtomicBool::new(false),
             worker: Mutex::new(None),
+            notifications: notifications::Runtime::default(),
             _lock: lock,
         }));
         for mut j in s.all::<Job>("job")? {
@@ -228,9 +231,11 @@ impl State {
         self.0.data.join(&r.known_hosts)
     }
     fn update(&self, app: &tauri::AppHandle, j: &Job, event: &str) {
-        if self.put("job", &j.id, j).is_ok() {
+        let committed = self.put("job", &j.id, j).is_ok();
+        if committed {
             let _ = app.emit(event, j);
         }
+        notifications::finished(self, app, j, committed);
     }
 }
 fn active_job(state: &str) -> bool {
@@ -446,6 +451,7 @@ fn worker(s: State, app: tauri::AppHandle) -> std::thread::JoinHandle<()> {
                     );
                     continue;
                 }
+                notifications::begin(&s, &j.id);
                 job_state(
                     &s,
                     &app,
@@ -931,6 +937,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             updates::check_update,
             updates::install_update,
+            notifications::get_notification_status,
+            notifications::set_notifications,
+            notifications::test_notification,
             list_remotes,
             add_remote,
             fetch_host_key,

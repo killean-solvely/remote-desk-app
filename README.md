@@ -18,6 +18,7 @@ Current Windows installers have no publisher certificate. Mac bundles are ad-hoc
 - Edit/delete saved connections and clear completed history without deleting downloaded files.
 - Reveal completed downloads in Explorer/Finder, or open a transfer's download folder.
 - Check for signed application updates and install them with confirmation.
+- Opt into private desktop alerts for background download completion or failure.
 
 Each selected item receives its own local job directory. Browsing preserves case-distinct names; a folder copy refuses names that would collide in one local directory tree. Completed-file retries use size checks; partial multithreaded files may restart from zero. SFTP downloads do not promise preservation of macOS bundle metadata or permissions; use a remotely prepared archive when that matters.
 
@@ -38,6 +39,12 @@ The engine download is checked against a pinned SHA256 before it is bundled. No 
 The manually dispatched Desktop builds workflow uses standard GitHub-hosted Windows and native Apple Silicon/Intel Mac runners. It runs the frontend, Rust tests, generated local transfer fixtures and installer checks. It does not use a personal machine or connect to a production SFTP server.
 
 Release signing is restricted to the main-branch releases environment. The private signing key is never committed. All three signed packages must pass before the HTTPS update feed advances. See [release maintenance](docs/updates.md) and [architecture](docs/architecture.md).
+
+## Version 0.6.1
+
+In **Settings > Download notifications**, enable **Desktop notifications**. On Mac, approve the system permission request. Alerts use generic completion/failure text; filenames, server details and logs stay in the app. Only live attempts finishing in the background can alert, with no cancellation or startup-history alerts. An explicit retry may alert for its new outcome. Delivery problems never change a transfer's saved result.
+
+Choose **Send test in 5 seconds**, then switch to another app. Remote Desk must stay open. **Check permission** refreshes the OS status without prompting; blocked states explain which system settings to check. Windows may initialize its per-app notification preferences with the first alert. Focus and system controls can silence alerts, so an accepted request does not guarantee a banner. Use the installed app so alerts carry Remote Desk's identity. No custom notification click action or service after app exit is added.
 
 ## Version 0.6.0
 
